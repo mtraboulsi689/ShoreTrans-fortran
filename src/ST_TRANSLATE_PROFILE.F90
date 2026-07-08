@@ -115,6 +115,7 @@ contains
       end if
 
       call get_profile(z_final, xi)
+      if (wall%z_min_check) call enforce_wall_z_min(z_final, xi, x_upp)
       write(msg, '(A,F12.4,A,F12.4,A)') 'Final xi: ', xi*dx, ' m (', xi, ' grid points)'
       call logger(2, adj(msg))
       call logger(2, 'Final volume error (dv): ' // adj(num2str(dv)) // ' m3')
@@ -211,6 +212,33 @@ contains
       end do
       call logger(1, 'Root finder reached max iterations')
    end function brent_root
+
+   subroutine enforce_wall_z_min(z_tmp, xi_tmp, x_upp)
+      real(kind=8), allocatable, intent(inout) :: z_tmp(:)
+      real(kind=8), intent(inout) :: xi_tmp
+      integer, intent(in) :: x_upp
+
+      if (.not. wall_z_min_reached(z_tmp)) return
+      do while (wall_z_min_reached(z_tmp) .and. xi_tmp .lt. real(x_upp, 8))
+         xi_tmp = min(real(x_upp, 8), xi_tmp + 1.d0)
+         call get_profile(z_tmp, xi_tmp)
+      end do
+      if (wall_z_min_reached(z_tmp)) then
+         call logger(1, 'wall_z_min reached at offshore translation bound')
+      else
+         call logger(1, 'wall_z_min reached, reducing wall erosion')
+      end if
+   end subroutine enforce_wall_z_min
+
+   logical function wall_z_min_reached(z_tmp)
+      real(kind=8), dimension(:), intent(in) :: z_tmp
+
+      wall_z_min_reached = .false.
+      if (wall%switch .eq. 0 .or. .not. wall%z_min_check) return
+      if (wall_z_initial) return
+      if (wall%index .ge. n_pts) return
+      wall_z_min_reached = z_tmp(wall%index + 1) .le. wall%z_min
+   end function wall_z_min_reached
 
    !> @brief Estimate the shoreline recession
    !! @details Estimate the shoreline recession using the

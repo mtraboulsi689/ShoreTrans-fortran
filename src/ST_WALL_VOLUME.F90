@@ -25,8 +25,12 @@ contains
 
 
       if(wall%switch .eq. 0 ) return
-      if(wall_z_initial) return ! already at max erosion
+      if(wall_z_initial) then
+         z1 = z
+         return ! already at max erosion
+      end if
       call wall_volume(z1, z_nowall, xi_tmp, dv_behind_wall)
+      where(z1 .lt. doc .and. x .le. x(doc_index)) z1 = doc
       if (dv_behind_wall.le. eps) return ! no volume to redistribute
 
       ! find point that is offshore the wall
@@ -56,6 +60,7 @@ contains
          interp1(x(ind_st), x(ind_en), &
          2 * dv_behind_wall/ (x(ind_en)-x(ind_st)), 0.d0, &
          x(ind_st:ind_en))
+      where(z1 .lt. doc .and. x .le. x(doc_index)) z1 = doc
    end subroutine redistribute_volume
 
    subroutine wall_volume(z1, z_nowall, xi_tmp, dv_behind_wall)
@@ -70,7 +75,7 @@ contains
       toe_crest2 = toe_crest + ds
       z_nowall_cap = z_nowall
       if (wall%no_erode) then
-         where((x.lt.x(wall%index)) .and. (z1 .lt. z)) z1 = z
+         where(x.lt.x(wall%index)) z1 = z
       end if
 
       if (wall%index + xi_tmp .le. 0) then

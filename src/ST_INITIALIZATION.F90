@@ -72,8 +72,12 @@ contains
       call logger(3, "Seawall is on")
       if (eql(wall%x, nanr)) then ! no wall_x, use wall_level
          tmp_array = 1
-         where(z.ge.wall%level) tmp_array = 0
-         wall%index = n_pts - minloc(tmp_array(n_pts:1:-1), 1) + 1
+         where(z.lt.wall%level) tmp_array = 0
+         if (all(tmp_array .eq. 1)) then
+            call logger(0, 'No profile point is below wall_level')
+            stop
+         end if
+         wall%index = minloc(tmp_array, 1)
          wall%x = x(wall%index)
          call logger(3, 'wall level is ' // adj(num2str(wall%level)))
          call logger(3, 'wall index is ' // adj(num2str(wall%x)))
@@ -91,7 +95,6 @@ contains
       if (wall%index .lt. n_pts) then
          if (z(wall%index + 1) .lt. wall%z_min) wall_z_initial =.true.
       end if
-
    end subroutine setup_wall
 
    subroutine setup_rock_layer

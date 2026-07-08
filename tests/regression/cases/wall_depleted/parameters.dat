@@ -1,0 +1,10 @@
+xshorefilename = profile.txt
+doc = -8
+toe_crest = 2
+ds = 0.5
+dx = 1
+wall = 1
+wall_x = 19
+wall_z_min = 100
+xi_test = 0
+verbose = 0

@@ -1,0 +1,14 @@
+xshorefilename = profile.txt
+doc = -8
+toe_crest = 2
+ds = 0
+dx = 1
+wall = 1
+wall_level = -13.5
+wall_overwash = 1
+wall_no_erode = 0
+wall_z_min_check = 1
+wall_z_min = -20
+redist_ratio = 0.5
+xi_test = 0
+verbose = 0

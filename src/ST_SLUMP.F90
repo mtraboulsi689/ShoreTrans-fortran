@@ -113,6 +113,7 @@ contains
 
       if(wall%switch.eq.0) return
       where(x.gt.x(wall%index)) z_max_slump = nanr
+      if (wall%index .le. 2) return
       ind = wall%index -1
 
       dz_wall = z(ind -1) - z_rock(ind)
@@ -127,7 +128,7 @@ contains
          pts  = pts + 1
          dune_offset = ind - pts - 1
 
-         if ( (dune_offset.eq. 0) ) then
+         if (dune_offset .le. 0) then
             call logger(1, 'Max slump near wall error')
             dune_angle2 = 30.d0
          else

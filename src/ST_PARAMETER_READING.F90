@@ -19,7 +19,7 @@ contains
       use st_helper
       implicit none
 
-      integer :: ios, n, eq_ind
+      integer :: ios, n, eq_ind, int_value
       character(len=*), intent(in) :: current_dir
       character(len=charlen) :: parameter_filename
       character(len=charlen) :: line, label
@@ -111,6 +111,19 @@ contains
             read (line, *, iostat=ios) wall%x
           case ('wall_level')
             read (line, *, iostat=ios) wall%level
+          case ('wall_overwash')
+            read (line, *, iostat=ios) int_value
+            wall%overwash = int_value .ne. 0
+          case ('wall_z_min_check')
+            read (line, *, iostat=ios) int_value
+            wall%z_min_check = int_value .ne. 0
+          case ('wall_z_min')
+            read (line, *, iostat=ios) wall%z_min
+          case ('wall_no_erode')
+            read (line, *, iostat=ios) int_value
+            wall%no_erode = int_value .ne. 0
+          case ('redist_ratio')
+            read (line, *, iostat=ios) wall%redist_ratio
           case ('xi_test')
             read (line, *, iostat=ios) xi_test
           case ('') ! skip empty lines

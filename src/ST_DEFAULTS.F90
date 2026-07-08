@@ -35,11 +35,11 @@ module st_defaults
       logical :: overwash ! if true, sediment is allowed to pile behind the wall
       logical :: z_min_check ! check to see if pt offshore of wall has eroded below WALL_Z_MIN
       real(kind=8) :: z_min
-      logical :: no_erode ! allows erosion behind wall
+      logical :: no_erode ! prevents change behind wall
       real(kind=8) :: redist_ratio
    end type wall_type
    type(wall_type) :: wall = wall_type(0, nanr, nanr, nani, &
-      .false., .false., -2, .false., 0.33d0) !< default values
+      .false., .false., -2, .true., 0.33d0) !< default values
    real(kind=8), parameter :: pi = 3.141592653589793d0 ! value of pi
    integer :: rollover = 0 !< 0=off, 1=on,2=on with no height preservation
    real(kind=8) :: roll_backSlope = 4 !< angle in degrees of the onshore slope
