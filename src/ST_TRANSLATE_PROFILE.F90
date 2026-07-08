@@ -341,38 +341,60 @@ contains
 
    !> @brief translate the profile
    !! @details translate the profile by xi (grid units, may be
-   !! fractional). The integer part shifts indices; the fractional part
-   !! interpolates linearly between the two adjacent integer shifts, so
-   !! the translation distance is continuous in x. Index-based
-   !! operations use the integer shifts bracketing xi: floor for the
-   !! crest fill and the wall masks, ceiling (= first shifted grid
-   !! point) for rollover, slump and offshore smoothing. Then calculate
-   !! the difference in volume between the original profile and the
-   !! translated profile.
+   !! fractional). Integer shifts use the original index-based pipeline.
+   !! Fractional shifts blend the two fully processed integer profiles
+   !! that bracket xi, which keeps dv(xi) continuous while preserving
+   !! exact integer behavior.
    !! @param[in] xi_tmp the shoreline recession/progression (grid units)
    !! @param[inout] z1 the profile to be translated
    subroutine get_profile(z1, xi_tmp)
       implicit none
       real(kind=8), allocatable, intent(out) :: z1(:) ! translated profile
       real(kind=8), intent(in) :: xi_tmp ! translation (grid units)
-      integer, dimension(:), allocatable :: active_ind ! active indices
-      integer :: active_size, i ! active size and loop index
       integer :: xi_lo, xi_up ! integer shifts bracketing xi_tmp
       real(kind=8) :: frac ! fractional part of the shift
-      real(kind=8) :: v0, v1 ! volumes of current and translated profiles
+      real(kind=8), allocatable :: z_lo(:), z_up(:)
+      real(kind=8) :: dv_lo, dv_up
+      logical :: integer_shift
 
       xi_lo = floor(xi_tmp)
       frac = xi_tmp - xi_lo
+      integer_shift = .false.
       if (frac .lt. sub_tol) then ! snap to an integer shift
          frac = 0.d0
+         integer_shift = .true.
       else if (frac .gt. 1.d0 - sub_tol) then
          frac = 0.d0
          xi_lo = xi_lo + 1
+         integer_shift = .true.
       end if
       xi_up = xi_lo
       if (frac .gt. 0.d0) xi_up = xi_lo + 1
 
-      active_size = doc_index - 1 - toe_crest_index - xi_up
+      if (integer_shift) then
+         call get_profile_integer(z1, xi_lo)
+      else
+         call get_profile_integer(z_lo, xi_lo)
+         dv_lo = dv
+         call get_profile_integer(z_up, xi_up)
+         dv_up = dv
+
+         allocate(z1(n_pts))
+         z1 = (1.d0 - frac) * z_lo + frac * z_up
+         dv = (1.d0 - frac) * dv_lo + frac * dv_up
+      end if
+   end subroutine get_profile
+
+   !> @brief translate and post-process the profile for an integer shift
+   subroutine get_profile_integer(z1, xi_tmp)
+      implicit none
+      real(kind=8), allocatable, intent(out) :: z1(:) ! translated profile
+      integer, intent(in) :: xi_tmp ! integer translation (grid units)
+      integer, dimension(:), allocatable :: active_ind ! active indices
+      integer :: active_size, i ! active size and loop index
+      real(kind=8) :: v0, v1 ! volumes of current and translated profiles
+
+      active_size = doc_index - 1 - toe_crest_index - xi_tmp
       if (active_size .le. 0) then
          call logger(0, 'get_profile: active_size <= 0'// &
             ' can not translate profile')
@@ -388,36 +410,27 @@ contains
          + ds
       z_nowall = z1 ! for wall calculation
       ! active zone is the zone that is translated
-      active_ind = (/(i, i=(toe_crest_index+xi_up),(doc_index-1))/)
-      if (frac .gt. 0.d0) then ! sub-grid shift: blend adjacent shifts
-         z1(active_ind) = (1.d0 - frac) * z1(active_ind - xi_lo) &
-            + frac * z1(active_ind - xi_lo - 1)
-      else
-         z1(active_ind) = z1(active_ind - xi_lo) ! move profile to the right
-      end if
+      active_ind = (/(i, i=(toe_crest_index+xi_tmp),(doc_index-1))/)
+      z1(active_ind) = z1(active_ind - xi_tmp) ! move profile to the right
 
       if (wall%switch.eq.1.and. .not.wall%overwash) then
          z_nowall(active_ind) = z1(active_ind)
          where(x.le.x(wall%index))  z1 = z
       end if
       call raise_rock(z1) ! reset profile above rock profile
-      call reset_elevation(z1, xi_lo) ! reset elevation at the end of the profile
-      if (xi_tmp .le. 0.d0) then ! interpolate at the end of the profile
-         call smooth_profile(z1, xi_lo, z_nowall)
-      else
-         call smooth_profile(z1, xi_up, z_nowall)
-      end if
+      call reset_elevation(z1, xi_tmp) ! reset elevation at the end of the profile
+      call smooth_profile(z1, xi_tmp, z_nowall) ! interpolate at the end of the profile
       ! slump profile (erosion of dunes)
       if (rollover .eq. 0) then
-         call slump_profile(z1, xi_up)
+         call slump_profile(z1, xi_tmp)
       else if (rollover .gt. 0) then ! 1 or 2
-         call rollover_profile(z1, xi_up)
+         call rollover_profile(z1, xi_tmp)
       end if
-      call redistribute_volume(z1, z_nowall, xi_lo)
+      call redistribute_volume(z1, z_nowall, xi_tmp)
       call raise_rock(z1) ! last check for rock
       ! calculate volume difference
       v0 = trapz(x(1:doc2_index), z0_rock(1:doc2_index) - doc2)
       v1 = trapz(x(1:doc2_index), z1(1:doc2_index) - doc2)
       dv = v1 - v0 - dv_input ! volume difference (error)
-   end subroutine get_profile
+   end subroutine get_profile_integer
 end module st_translate_profile
