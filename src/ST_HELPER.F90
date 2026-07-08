@@ -371,17 +371,22 @@ contains
       n2 = size(x2)
       n1 = size(x1)
       allocate(y2(n2))
-      do i=1,n2-1
+      do i=1,n2
          ipos = locate(x1, x2(i))
          if(ipos .eq. n1) then
             y2(i) = y1(n1)
          else if (ipos .eq. 0) then
             y2(i) = y1(1)
          else if(ipos .eq. -1) then
-            y2(i) = 0
+            if ((x1(n1) .gt. x1(1) .and. x2(i) .lt. x1(1)) .or. &
+               (x1(n1) .lt. x1(1) .and. x2(i) .gt. x1(1))) then
+               y2(i) = y1(1)
+            else
+               y2(i) = y1(n1)
+            end if
          else
-            y2(i:i+1) = interp1(x1(ipos), x1(ipos+1), &
-               y1(ipos), y1(ipos+1), x2(i:i+1))
+            y2(i:i) = interp1(x1(ipos), x1(ipos+1), &
+               y1(ipos), y1(ipos+1), x2(i:i))
          end if
       end do
    end function interp1_vec
