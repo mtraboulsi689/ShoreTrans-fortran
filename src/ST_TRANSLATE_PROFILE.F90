@@ -254,7 +254,7 @@ contains
       integer :: st_min, start_ind, end_ind ! smoothing profile
       ! smoothing the profile
       if (xi_tmp .le. 0) then
-         st_min = nint(w * 0.1) ! minimum smoothing window
+         st_min = nint(w * 0.1d0 / dx) ! minimum smoothing window in grid points
          start_ind = min((doc_index -1 + xi_tmp), &
             (doc_index - st_min)) ! min smoothing window
          end_ind = doc_index
