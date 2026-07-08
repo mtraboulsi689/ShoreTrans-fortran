@@ -239,7 +239,7 @@ contains
          z_rock = rock_tmp
       else
          ! dx should always be +ve
-         n_pts = int((x_tmp(n_pts) - x_tmp(1)) / dx) +1
+         n_pts = nint((x_tmp(n_pts) - x_tmp(1)) / dx) +1
          allocate(x(n_pts), z(n_pts), z_rock(n_pts))
          do i=1,n_pts
             x(i) = x_tmp(1) + dx * (i-1)
