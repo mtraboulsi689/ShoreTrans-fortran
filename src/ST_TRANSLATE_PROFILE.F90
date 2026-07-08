@@ -15,7 +15,6 @@ module st_translate_profile
 
    implicit none
    integer :: xi
-   real(kind=8), allocatable :: dv_tmp(:)
    public :: translate_profile, xi
 
 
@@ -23,13 +22,23 @@ module st_translate_profile
    private
 contains
 
+   !> @brief find the translation distance that closes the volume budget
+   !! @details the volume error dv(xi) increases monotonically with xi
+   !! (translating the profile offshore retains more volume), so the
+   !! root of dv(xi) = 0 is found by bracketing a sign change and
+   !! bisecting it down to two adjacent grid points. The Bruun estimate
+   !! seeds the bracket search; dv is near-linear in xi for sandy
+   !! profiles, so the seed usually lands within a few points of the root.
    subroutine translate_profile()
 
-      integer :: i, x_upp, x_low, xi_est, step, x_tmp
-      real(kind=8) :: grad_f, dv_est, dv_plus, dv_minus
+      integer :: x_upp, x_low, x_tmp
+      integer :: lo, hi, mid, step
+      real(kind=8) :: f_lo, f_hi, f_mid
       character(len=charlen) :: msg
       allocate(z_final(n_pts))
-      ! get the upper and lower bounds
+      ! active profile height/width (also used by smooth_profile)
+      h = toe_crest - doc
+      w = x(doc_index) - x(toe_crest_index)
 
       if(xi_test.ne.nani) then
          call logger(2, 'Using xi=' // adj(num2str(xi_test)) // ' grid points')
@@ -38,6 +47,7 @@ contains
          call logger(2, 'Final volume error (dv): ' // adj(num2str(dv)) // ' m3')
          return
       end if
+      ! translation bounds imposed by the profile extent
       x_upp = min(n_pts - doc_index -1, doc_index - 2 - toe_crest_index)
       x_low = - min( toe_crest_index-1, n_pts-doc_index-1)
       if(x_low .gt. x_upp) then
@@ -46,94 +56,95 @@ contains
          x_low = x_upp
          x_upp = x_tmp
       end if
+      if (wall%switch.eq.1) x_low = max(x_low, 1 - wall%index)
+      if (x_low .gt. x_upp) then
+         call logger(0, 'No valid translation range (wall too close to '// &
+            'the onshore boundary). Extend the profile onshore.')
+         stop
+      end if
       write(msg, '(A,I8,A,I8,A)') 'Bounds: x_upp = ', x_upp, ' grid points, x_low = ', x_low, ' grid points'
       call logger(3, adj(msg))
-      if (wall%switch.eq.1) x_low = max(x_low, 1 - wall%index)
-      allocate(dv_tmp(x_low:x_upp))
-      dv_tmp = nanr
-      xi_est = bruun_estimate() ! calculate the bruun rule estimate
 
-      if (xi_est.lt.min(x_low, x_upp).or.xi_est.gt.max(x_upp, x_low)) then
-         ! check in case bruun estimate is outside of interval
-         call logger(3, 'Xi_est outside interval bounds, resetting to midpoint')
-         xi_est = nint(0.5d0 * (x_upp + x_low))
+      ! seed with the Bruun estimate, clamped inside the bounds
+      lo = min(max(bruun_estimate(), x_low), x_upp)
+      f_lo = evaluate_f(lo)
+      hi = lo
+      f_hi = f_lo
+
+      ! expand away from the seed, doubling the step, until dv changes
+      ! sign or a bound is reached. Invariant afterwards: either
+      ! f_lo <= 0 <= f_hi (bracket found) or the same sign holds across
+      ! the whole range (budget cannot be closed within the bounds).
+      if (.not. eql(f_lo, 0.d0)) then
+         step = 1
+         if (f_lo .gt. 0.d0) then ! volume surplus: root is onshore
+            do while (f_lo .gt. 0.d0 .and. lo .gt. x_low)
+               hi = lo
+               f_hi = f_lo
+               lo = max(x_low, lo - step)
+               f_lo = evaluate_f(lo)
+               step = 2 * step
+            end do
+         else ! volume deficit: root is offshore
+            do while (f_hi .lt. 0.d0 .and. hi .lt. x_upp)
+               lo = hi
+               f_lo = f_hi
+               hi = min(x_upp, hi + step)
+               f_hi = evaluate_f(hi)
+               step = 2 * step
+            end do
+         end if
+
+         if (f_lo .gt. 0.d0) then
+            hi = x_low
+            call logger(1, 'Volume budget cannot be closed within the '// &
+               'onshore bound, using xi = ' // adj(num2str(x_low)))
+         else if (f_hi .lt. 0.d0) then
+            lo = x_upp
+            call logger(1, 'Volume budget cannot be closed within the '// &
+               'offshore bound, using xi = ' // adj(num2str(x_upp)))
+         else
+            ! bisect the bracket down to two adjacent grid points
+            do while (hi - lo .gt. 1)
+               mid = lo + (hi - lo) / 2
+               f_mid = evaluate_f(mid)
+               if (eql(f_mid, 0.d0)) then
+                  lo = mid
+                  f_lo = f_mid
+                  hi = mid
+                  f_hi = f_mid
+               else if (f_mid .gt. 0.d0) then
+                  hi = mid
+                  f_hi = f_mid
+               else
+                  lo = mid
+                  f_lo = f_mid
+               end if
+            end do
+         end if
       end if
-      do i=1,max_iter
-         write(msg, '(A,I8,A,I8,A)') 'Iteration ', i, ': xi_est = ', xi_est, ' grid points'
-         call logger(4, adj(msg))
-         if(xi_est .lt. min(x_low, x_upp) ) then
-         xi_est = min(x_low, x_upp) - sign(2, min(x_low, x_upp));
-         write(msg, '(A,I8,A)') 'Adjusted xi_est (lower bound): ', xi_est, ' grid points'
-         call logger(4, adj(msg))
-         else if(xi_est .ge. max(x_upp,x_low)) then
-         xi_est = max(x_low, x_upp) -sign(2, max(x_low, x_upp));
-         write(msg, '(A,I8,A)') 'Adjusted xi_est (upper bound): ', xi_est, ' grid points'
-         call logger(4, adj(msg))
-         end if
 
-         if (abs(dv_tmp(xi_est) - nanr) > 1.0d-8) then ! we already have a value xi_est
-         ! Find the minimum value among already calculated points
-         xi_est = minloc(abs(dv_tmp), 1, abs(dv_tmp - nanr) > 1.0d-8) + x_low - 1
-         call logger(4, 'Found existing minimum volume error, exiting iteration')
-         exit
-         end if
-
-         dv_est = evaluate_f(xi_est)
-         if (eql(dv_est,0.d0)) then
-            call logger(4, 'Current volume error is zero, solution found')
-            exit
-         endif
-
-         dv_plus = evaluate_f(xi_est +1)
-         if (eql(dv_plus,0.d0)) then
-            xi_est = xi_est +1
-            call logger(4, 'Found zero volume error at xi_est+1, solution found')
-            exit
-         end if
-
-         dv_minus = evaluate_f(xi_est -1)
-         if (eql(dv_minus,0.d0)) then
-            xi_est = xi_est -1
-            call logger(4, 'Found zero volume error at xi_est-1, solution found')
-            exit
-         end if
-
-         ! calculate the gradient at this point
-         grad_f = (dv_plus - dv_minus) /2.d0
-         write(msg, '(A,E12.5,A)') 'Volume error gradient = ', grad_f, ' m3/grid point'
-         call logger(4, adj(msg))
-         if (eql(grad_f,0.d0)) then
-            call logger(4, 'Zero gradient detected, no further improvement possible')
-            exit
-         endif
-
-         ! calculate the new estimate
-         step = nint(dv_est/grad_f)
-         if (step.eq.0) then
-            call logger(4, 'Step size is zero, no further improvement possible')
-            exit
-         endif
-         xi_est = xi_est - step
-      end do
-      xi =xi_est
-      call get_profile(z_final, xi_est)
+      ! keep whichever side of the bracket has the smaller residual
+      if (abs(f_lo) .le. abs(f_hi)) then
+         xi = lo
+      else
+         xi = hi
+      end if
+      call get_profile(z_final, xi)
       write(msg, '(A,F10.4,A,I8,A)') 'Final xi: ', xi*dx, ' m (', xi, ' grid points)'
       call logger(2, adj(msg))
       call logger(2, 'Final volume error (dv): ' // adj(num2str(dv)) // ' m3')
+      if (abs(dv) .gt. h) call logger(1, 'Large volume error, check results')
    end subroutine translate_profile
 
 
+   !> @brief volume error for a candidate translation distance
    function evaluate_f(xi_est)
       integer, intent(in) :: xi_est
       real(kind=8) :: evaluate_f
       character(len=charlen) :: msg
-      if (eql( dv_tmp(xi_est), nanr)) then
-         call get_profile(z_final, xi_est)
-         dv_tmp(xi_est) = dv
-         evaluate_f = dv
-      else
-         evaluate_f = dv_tmp(xi_est)
-      end if
+      call get_profile(z_final, xi_est)
+      evaluate_f = dv
       write(msg, *) 'xi = ', xi_est, 'error = ', evaluate_f
       call logger(3, adj(msg) )
    end function evaluate_f
@@ -148,8 +159,6 @@ contains
    function bruun_estimate() result(xi_est)
       integer :: xi_est
       real(kind=8) :: x_est
-      h = toe_crest - doc
-      w = x(doc_index) - x(toe_crest_index)
       ! xi is the one calculate from bruun rule
       ! plus any additional (sources/sinks)
       x_est = (-ds * w / h) + (dv_input / h)! calculate the estimate
