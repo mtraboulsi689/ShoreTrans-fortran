@@ -265,11 +265,11 @@ contains
 
       ! additional checks to remove errors
       if (start_ind .le. 0) then
-         start_ind =0;
+         start_ind = 1
          call logger(1, 'The smoothing points are beyond the edge of the profile. '// &
             'Begin smoothing from the start of the profile. ')
-
-      else if(end_ind .ge. n_pts) then
+      end if
+      if(end_ind .ge. n_pts) then
          end_ind = n_pts
          call logger(1, 'The smoothing points are beyond the edge of the profile. '// &
             'End smoothing at the end of the profile.')
