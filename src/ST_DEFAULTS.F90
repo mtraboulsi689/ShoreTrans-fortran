@@ -76,7 +76,7 @@ module st_defaults
    !! -1 = no output
    integer :: verbose = 2
 
-   integer :: xi_test = nani
+   real(kind=8) :: xi_test = nanr !< force a fixed translation (grid units, may be fractional)
 
    ! initial variables
    real(kind=8) :: h  !< height of active profile

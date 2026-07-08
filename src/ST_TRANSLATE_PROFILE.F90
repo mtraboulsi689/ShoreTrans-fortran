@@ -14,7 +14,9 @@ module st_translate_profile
 
 
    implicit none
-   integer :: xi
+   real(kind=8) :: xi !< translation distance (grid units, may be fractional)
+   !> below this fraction of a grid cell, a shift counts as integer
+   real(kind=8), parameter :: sub_tol = 1.d-9
    public :: translate_profile, xi
 
 
@@ -26,21 +28,23 @@ contains
    !! @details the volume error dv(xi) increases monotonically with xi
    !! (translating the profile offshore retains more volume), so the
    !! root of dv(xi) = 0 is found by bracketing a sign change and
-   !! bisecting it down to two adjacent grid points. The Bruun estimate
+   !! solving inside the bracket with Brent's method. xi is continuous:
+   !! sub-grid translations are handled by get_profile, so the closure
+   !! of the volume budget does not depend on dx. The Bruun estimate
    !! seeds the bracket search; dv is near-linear in xi for sandy
    !! profiles, so the seed usually lands within a few points of the root.
    subroutine translate_profile()
 
       integer :: x_upp, x_low, x_tmp
-      integer :: lo, hi, mid, step
-      real(kind=8) :: f_lo, f_hi, f_mid
+      real(kind=8) :: lo, hi, step
+      real(kind=8) :: f_lo, f_hi
       character(len=charlen) :: msg
       allocate(z_final(n_pts))
       ! active profile height/width (also used by smooth_profile)
       h = toe_crest - doc
       w = x(doc_index) - x(toe_crest_index)
 
-      if(xi_test.ne.nani) then
+      if(.not. eql(xi_test, nanr)) then
          call logger(2, 'Using xi=' // adj(num2str(xi_test)) // ' grid points')
          xi = xi_test
          call get_profile(z_final, xi)
@@ -66,7 +70,7 @@ contains
       call logger(3, adj(msg))
 
       ! seed with the Bruun estimate, clamped inside the bounds
-      lo = min(max(bruun_estimate(), x_low), x_upp)
+      lo = min(max(bruun_estimate(), real(x_low, 8)), real(x_upp, 8))
       f_lo = evaluate_f(lo)
       hi = lo
       f_hi = f_lo
@@ -76,62 +80,42 @@ contains
       ! f_lo <= 0 <= f_hi (bracket found) or the same sign holds across
       ! the whole range (budget cannot be closed within the bounds).
       if (.not. eql(f_lo, 0.d0)) then
-         step = 1
+         step = 1.d0
          if (f_lo .gt. 0.d0) then ! volume surplus: root is onshore
             do while (f_lo .gt. 0.d0 .and. lo .gt. x_low)
                hi = lo
                f_hi = f_lo
-               lo = max(x_low, lo - step)
+               lo = max(real(x_low, 8), lo - step)
                f_lo = evaluate_f(lo)
-               step = 2 * step
+               step = 2.d0 * step
             end do
          else ! volume deficit: root is offshore
             do while (f_hi .lt. 0.d0 .and. hi .lt. x_upp)
                lo = hi
                f_lo = f_hi
-               hi = min(x_upp, hi + step)
+               hi = min(real(x_upp, 8), hi + step)
                f_hi = evaluate_f(hi)
-               step = 2 * step
+               step = 2.d0 * step
             end do
          end if
 
          if (f_lo .gt. 0.d0) then
-            hi = x_low
+            xi = x_low
             call logger(1, 'Volume budget cannot be closed within the '// &
                'onshore bound, using xi = ' // adj(num2str(x_low)))
          else if (f_hi .lt. 0.d0) then
-            lo = x_upp
+            xi = x_upp
             call logger(1, 'Volume budget cannot be closed within the '// &
                'offshore bound, using xi = ' // adj(num2str(x_upp)))
          else
-            ! bisect the bracket down to two adjacent grid points
-            do while (hi - lo .gt. 1)
-               mid = lo + (hi - lo) / 2
-               f_mid = evaluate_f(mid)
-               if (eql(f_mid, 0.d0)) then
-                  lo = mid
-                  f_lo = f_mid
-                  hi = mid
-                  f_hi = f_mid
-               else if (f_mid .gt. 0.d0) then
-                  hi = mid
-                  f_hi = f_mid
-               else
-                  lo = mid
-                  f_lo = f_mid
-               end if
-            end do
+            xi = brent_root(lo, hi, f_lo, f_hi)
          end if
+      else
+         xi = lo
       end if
 
-      ! keep whichever side of the bracket has the smaller residual
-      if (abs(f_lo) .le. abs(f_hi)) then
-         xi = lo
-      else
-         xi = hi
-      end if
       call get_profile(z_final, xi)
-      write(msg, '(A,F10.4,A,I8,A)') 'Final xi: ', xi*dx, ' m (', xi, ' grid points)'
+      write(msg, '(A,F12.4,A,F12.4,A)') 'Final xi: ', xi*dx, ' m (', xi, ' grid points)'
       call logger(2, adj(msg))
       call logger(2, 'Final volume error (dv): ' // adj(num2str(dv)) // ' m3')
       if (abs(dv) .gt. h) call logger(1, 'Large volume error, check results')
@@ -140,7 +124,7 @@ contains
 
    !> @brief volume error for a candidate translation distance
    function evaluate_f(xi_est)
-      integer, intent(in) :: xi_est
+      real(kind=8), intent(in) :: xi_est
       real(kind=8) :: evaluate_f
       character(len=charlen) :: msg
       call get_profile(z_final, xi_est)
@@ -148,6 +132,85 @@ contains
       write(msg, *) 'xi = ', xi_est, 'error = ', evaluate_f
       call logger(3, adj(msg) )
    end function evaluate_f
+
+   !> @brief Brent's method root finder on the volume error
+   !! @details standard Brent algorithm (inverse quadratic / secant
+   !! steps with a bisection fallback), starting from a bracket
+   !! [ax, bx] with f(ax) and f(bx) of opposite sign.
+   !! Converges to |dv| < eps or an interval below xi_tol.
+   !! @param[in] ax, bx the bracket (grid units)
+   !! @param[in] fax, fbx volume errors at ax and bx
+   !! @return the root (grid units)
+   function brent_root(ax, bx, fax, fbx) result(b)
+      real(kind=8), intent(in) :: ax, bx, fax, fbx
+      real(kind=8) :: a, b, c, d, e, fa, fb, fc
+      real(kind=8) :: p, q, r, s, tol1, xm
+      integer :: iter
+      integer, parameter :: itmax = 60
+      real(kind=8), parameter :: xi_tol = 1.d-6 ! interval tolerance (grid units)
+
+      a = ax
+      fa = fax
+      b = bx
+      fb = fbx
+      c = b
+      fc = fb
+      d = b - a
+      e = d
+      do iter = 1, itmax
+         if ((fb .gt. 0.d0 .and. fc .gt. 0.d0) .or. &
+            (fb .lt. 0.d0 .and. fc .lt. 0.d0)) then
+            c = a ! reset c so that the root stays in [b, c]
+            fc = fa
+            d = b - a
+            e = d
+         end if
+         if (abs(fc) .lt. abs(fb)) then ! b is the best estimate
+            a = b
+            b = c
+            c = a
+            fa = fb
+            fb = fc
+            fc = fa
+         end if
+         tol1 = 2.d0 * epsilon(1.d0) * abs(b) + 0.5d0 * xi_tol
+         xm = 0.5d0 * (c - b)
+         if (abs(xm) .le. tol1 .or. eql(fb, 0.d0)) return
+         if (abs(e) .ge. tol1 .and. abs(fa) .gt. abs(fb)) then
+            s = fb / fa ! attempt inverse quadratic interpolation
+            if (eql(a, c)) then
+               p = 2.d0 * xm * s
+               q = 1.d0 - s
+            else
+               q = fa / fc
+               r = fb / fc
+               p = s * (2.d0*xm*q*(q - r) - (b - a)*(r - 1.d0))
+               q = (q - 1.d0) * (r - 1.d0) * (s - 1.d0)
+            end if
+            if (p .gt. 0.d0) q = -q
+            p = abs(p)
+            if (2.d0*p .lt. min(3.d0*xm*q - abs(tol1*q), abs(e*q))) then
+               e = d ! interpolation accepted
+               d = p / q
+            else
+               d = xm ! fall back to bisection
+               e = d
+            end if
+         else
+            d = xm
+            e = d
+         end if
+         a = b
+         fa = fb
+         if (abs(d) .gt. tol1) then
+            b = b + d
+         else
+            b = b + sign(tol1, xm)
+         end if
+         fb = evaluate_f(b)
+      end do
+      call logger(1, 'Root finder reached max iterations')
+   end function brent_root
 
    !> @brief Estimate the shoreline recession
    !! @details Estimate the shoreline recession using the
@@ -157,15 +220,13 @@ contains
    !! it is used as an initial guess for the main loop
    !! @return the estimate of the shoreline recession/progression
    function bruun_estimate() result(xi_est)
-      integer :: xi_est
-      real(kind=8) :: x_est
+      real(kind=8) :: xi_est
       ! xi is the one calculate from bruun rule
       ! plus any additional (sources/sinks)
-      x_est = (-ds * w / h) + (dv_input / h)! calculate the estimate
-      xi_est = nint(x_est / dx) ! round to nearest integer
+      xi_est = ((-ds * w / h) + (dv_input / h)) / dx ! in grid units
       ! catch any xi values that are too large
       if (- xi_est .ge. toe_crest_index) then
-         xi_est = 1 - toe_crest_index
+         xi_est = real(1 - toe_crest_index, 8)
          call logger(1, "xi is too large, setting to"// &
             num2str(1 - toe_crest_index ))
       end if
@@ -279,21 +340,39 @@ contains
    end subroutine raise_rock
 
    !> @brief translate the profile
-   !! @details translate the profile by xi
-   !! then calculate the difference in volume between the
-   !! original profile and the translated profile
-   !! @param[in] xi_tmp the shoreline recession/progression
-   !! @param[inout] z_out the profile to be translated
-   !! @return the translated profile
+   !! @details translate the profile by xi (grid units, may be
+   !! fractional). The integer part shifts indices; the fractional part
+   !! interpolates linearly between the two adjacent integer shifts, so
+   !! the translation distance is continuous in x. Index-based
+   !! operations use the integer shifts bracketing xi: floor for the
+   !! crest fill and the wall masks, ceiling (= first shifted grid
+   !! point) for rollover, slump and offshore smoothing. Then calculate
+   !! the difference in volume between the original profile and the
+   !! translated profile.
+   !! @param[in] xi_tmp the shoreline recession/progression (grid units)
+   !! @param[inout] z1 the profile to be translated
    subroutine get_profile(z1, xi_tmp)
       implicit none
       real(kind=8), allocatable, intent(out) :: z1(:) ! translated profile
-      integer, intent(in) :: xi_tmp ! index of current profile
+      real(kind=8), intent(in) :: xi_tmp ! translation (grid units)
       integer, dimension(:), allocatable :: active_ind ! active indices
       integer :: active_size, i ! active size and loop index
+      integer :: xi_lo, xi_up ! integer shifts bracketing xi_tmp
+      real(kind=8) :: frac ! fractional part of the shift
       real(kind=8) :: v0, v1 ! volumes of current and translated profiles
 
-      active_size = doc_index - 1 - toe_crest_index - xi_tmp
+      xi_lo = floor(xi_tmp)
+      frac = xi_tmp - xi_lo
+      if (frac .lt. sub_tol) then ! snap to an integer shift
+         frac = 0.d0
+      else if (frac .gt. 1.d0 - sub_tol) then
+         frac = 0.d0
+         xi_lo = xi_lo + 1
+      end if
+      xi_up = xi_lo
+      if (frac .gt. 0.d0) xi_up = xi_lo + 1
+
+      active_size = doc_index - 1 - toe_crest_index - xi_up
       if (active_size .le. 0) then
          call logger(0, 'get_profile: active_size <= 0'// &
             ' can not translate profile')
@@ -309,23 +388,32 @@ contains
          + ds
       z_nowall = z1 ! for wall calculation
       ! active zone is the zone that is translated
-      active_ind = (/(i, i=(toe_crest_index+xi_tmp),(doc_index-1))/)
-      z1(active_ind) = z1(active_ind - xi_tmp) ! move profile to the right
+      active_ind = (/(i, i=(toe_crest_index+xi_up),(doc_index-1))/)
+      if (frac .gt. 0.d0) then ! sub-grid shift: blend adjacent shifts
+         z1(active_ind) = (1.d0 - frac) * z1(active_ind - xi_lo) &
+            + frac * z1(active_ind - xi_lo - 1)
+      else
+         z1(active_ind) = z1(active_ind - xi_lo) ! move profile to the right
+      end if
 
       if (wall%switch.eq.1.and. .not.wall%overwash) then
          z_nowall(active_ind) = z1(active_ind)
          where(x.le.x(wall%index))  z1 = z
       end if
       call raise_rock(z1) ! reset profile above rock profile
-      call reset_elevation(z1, xi_tmp) ! reset elevation at the end of the profile
-      call smooth_profile(z1, xi_tmp, z_nowall) ! interpolate at the end of the profile
+      call reset_elevation(z1, xi_lo) ! reset elevation at the end of the profile
+      if (xi_tmp .le. 0.d0) then ! interpolate at the end of the profile
+         call smooth_profile(z1, xi_lo, z_nowall)
+      else
+         call smooth_profile(z1, xi_up, z_nowall)
+      end if
       ! slump profile (erosion of dunes)
       if (rollover .eq. 0) then
-         call slump_profile(z1, xi_tmp)
+         call slump_profile(z1, xi_up)
       else if (rollover .gt. 0) then ! 1 or 2
-         call rollover_profile(z1, xi_tmp)
+         call rollover_profile(z1, xi_up)
       end if
-      call redistribute_volume(z1, z_nowall, xi_tmp)
+      call redistribute_volume(z1, z_nowall, xi_lo)
       call raise_rock(z1) ! last check for rock
       ! calculate volume difference
       v0 = trapz(x(1:doc2_index), z0_rock(1:doc2_index) - doc2)

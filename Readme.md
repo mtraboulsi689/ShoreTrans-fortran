@@ -26,7 +26,8 @@ It applies directly to surveyed coastal profiles, avoiding the need for simplifi
 
 This version is a direct translation of the MATLAB code into modern Fortran 2008, with the following enhancements:
 
-- Improved root-solving routine for better optimization and numerical stability
+- Improved root-solving routine (bracketing + Brent's method) for better optimization and numerical stability
+- Continuous (sub-grid) translation distance: the volume budget is closed to machine precision independently of the grid resolution
 - Support for sub-meter transect resolution (`dx < 1m`) -- enabling high-resolution modeling of complex morphologies
 - Modular code structure suitable for batch runs, sensitivity analyses, or integration into larger modeling frameworks
 
