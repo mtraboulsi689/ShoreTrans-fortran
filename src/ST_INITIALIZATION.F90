@@ -88,7 +88,9 @@ contains
       end if
 
       ! wall fully depleted
-      if (z(wall%index + 1) .lt. wall%z_min) wall_z_initial =.true.
+      if (wall%index .lt. n_pts) then
+         if (z(wall%index + 1) .lt. wall%z_min) wall_z_initial =.true.
+      end if
 
    end subroutine setup_wall
 
@@ -202,7 +204,8 @@ contains
       ! skip comment lines
       do
          read(fid, '(A)', iostat=ios) line
-         if (index(line, '!') == 0) exit ! skip comment lines
+         call clean_line(line)
+         if (line .ne. '') exit ! skip comment lines
       end do
 
       ! we expect the first line to be the number of points

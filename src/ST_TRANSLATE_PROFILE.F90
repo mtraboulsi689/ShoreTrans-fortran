@@ -429,8 +429,8 @@ contains
       call redistribute_volume(z1, z_nowall, xi_tmp)
       call raise_rock(z1) ! last check for rock
       ! calculate volume difference
-      v0 = trapz(x(1:doc2_index), z0_rock(1:doc2_index) - doc2)
-      v1 = trapz(x(1:doc2_index), z1(1:doc2_index) - doc2)
+      v0 = trapz(x, z0_rock - doc2)
+      v1 = trapz(x, z1 - doc2)
       dv = v1 - v0 - dv_input ! volume difference (error)
    end subroutine get_profile_integer
 end module st_translate_profile

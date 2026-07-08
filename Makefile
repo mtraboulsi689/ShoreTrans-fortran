@@ -52,6 +52,7 @@ help:
 	@echo "Targets:"
 	@echo "  help     Show this help message"
 	@echo "  exe      Build the executable (default BUILD=release)"
+	@echo "  test     Run regression cases"
 	@echo "  clean    Remove build artifacts"
 
 # Link executable
@@ -72,9 +73,12 @@ $(BIN_DIR):
 # Public target
 exe: $(SHORETRANS_EXE)
 
+test: $(SHORETRANS_EXE)
+	tests/regression/run.sh $(SHORETRANS_EXE)
+
 # Cleanup
 clean:
 	rm -f $(OBJ_DIR)/*.o $(OBJ_DIR)/*.mod $(SHORETRANS_EXE)
 
 # Declare targets as phony to avoid accidental collisions
-.PHONY: all exe clean help $(OBJ_DIR) $(BIN_DIR)
+.PHONY: all exe test clean help $(OBJ_DIR) $(BIN_DIR)

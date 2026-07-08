@@ -46,11 +46,15 @@ contains
       where (x .ge. x(ind_st) + wall%redist_ratio * len_walldoc)&
          tmp_ind = 0
       ind_en =  minloc(tmp_ind,1)
+      if (ind_en .le. ind_st .or. x(ind_en) - x(ind_st) .le. eps) then
+         call logger(1, 'Wall redistribution span is too short')
+         return
+      end if
       ! linear interpolation to redistribute volume from wall
       ! to cross-over point
       z1(ind_st:ind_en) = z1(ind_st:ind_en) - &
          interp1(x(ind_st), x(ind_en), &
-         2 * dv_behind_wall/ (x(ind_en)-x(ind_st+1)), 0.d0, &
+         2 * dv_behind_wall/ (x(ind_en)-x(ind_st)), 0.d0, &
          x(ind_st:ind_en))
    end subroutine redistribute_volume
 

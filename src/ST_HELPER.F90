@@ -119,6 +119,12 @@ contains
       integer, parameter :: fid_write = 19
       character(charlen) :: out_name_tmp, iomsg
 
+      call execute_command_line('mkdir -p ' // adj(dir_name) // '/outputs', &
+         exitstat=ios)
+      if (ios .ne. 0) then
+         call logger(0, 'Error: could not create outputs directory')
+         stop
+      end if
       out_name_tmp = adj(dir_name) &
          // '/outputs/' // adj(out_name)
       if (present(arr2_)) then

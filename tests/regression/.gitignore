@@ -1,0 +1,3 @@
+cases/*/outputs/
+cases/*/run.log
+cases/*/log_*.log

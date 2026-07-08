@@ -138,6 +138,7 @@ contains
 
       if (pts.ge.ind) return
       pts = ind - pts - 1
+      if (pts .lt. 1) return
       z_max_slump(pts:ind) = interp1( x(pts), x(ind), &
          z(pts), z_rock(ind), x(pts:ind) )
    end subroutine wall_slump
